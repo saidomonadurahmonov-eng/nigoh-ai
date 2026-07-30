@@ -1,0 +1,27 @@
+# SIRLAR — hech qachon commit qilinmaydi
+config.yaml
+*.env
+.env
+
+# Ish fayllari
+.venv/
+__pycache__/
+*.pyc
+*.pt
+*.db
+*.db-wal
+*.db-shm
+logs/
+*.log
+
+# Video / kadrlar (obyekt ma'lumoti — maxfiy)
+*.mp4
+*.avi
+*.jpg
+*.jpeg
+*.png
+kassa_arxiv/
+kanallar/
+webapp_clips/
+agent_klip/
+railway_app/clips/

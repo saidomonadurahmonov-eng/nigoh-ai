@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Kassa nazorati</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root {
+    --bg: var(--tg-theme-bg-color, #17212b);
+    --sec: var(--tg-theme-secondary-bg-color, #232e3c);
+    --txt: var(--tg-theme-text-color, #fff);
+    --hint: var(--tg-theme-hint-color, #90a0af);
+    --btn: var(--tg-theme-button-color, #3390ec);
+    --btntxt: var(--tg-theme-button-text-color, #fff);
+    --link: var(--tg-theme-link-color, #6ab3f3);
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; background: var(--bg); color: var(--txt);
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif; font-size: 15px;
+    padding: 14px; }
+  h1 { font-size: 19px; margin: 0 0 12px; font-weight: 600; }
+  h2 { font-size: 14px; color: var(--hint); margin: 18px 0 8px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: .04em; }
+  .card { background: var(--sec); border-radius: 12px; padding: 12px; margin-bottom: 8px; }
+  .row { display: flex; align-items: center; gap: 10px; }
+  .grow { flex: 1; min-width: 0; }
+  .muted { color: var(--hint); font-size: 13px; }
+  .stat { display: flex; gap: 14px; flex-wrap: wrap; }
+  .stat b { font-size: 22px; font-weight: 700; display: block; }
+  button { border: none; border-radius: 10px; padding: 10px 14px; font-size: 15px;
+    font-weight: 600; background: var(--btn); color: var(--btntxt); cursor: pointer; }
+  button.ghost { background: transparent; color: var(--link); padding: 8px 10px; }
+  button:active { opacity: .7; }
+  button:disabled { opacity: .4; }
+  input, select { background: var(--bg); color: var(--txt); border: 1px solid #384656;
+    border-radius: 10px; padding: 10px; font-size: 15px; }
+  .ev { border-bottom: 1px solid rgba(255,255,255,.06); padding: 10px 0; }
+  .ev:last-child { border-bottom: none; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #3ddc84; flex: none; }
+  .dot.off { background: #e05a4e; }
+  video { width: 100%; border-radius: 12px; background: #000; margin-top: 6px; }
+  #player { display: none; }
+  .center { text-align: center; color: var(--hint); padding: 16px; }
+  .done { background: #3ddc84; color: #06331c; width: 100%; margin-top: 10px; }
+</style>
+</head>
+<body>
+<h1>Kassa nazorati</h1>
+
+<div class="card">
+  <div class="stat" id="status"><span class="muted">yuklanmoqda…</span></div>
+</div>
+
+<h2>Vaqt bo'yicha kesib olish</h2>
+<div class="card">
+  <div class="row">
+    <input id="vaqt" type="time" step="1" class="grow">
+    <select id="davomiylik">
+      <option value="60">1 daq</option>
+      <option value="120" selected>2 daq</option>
+      <option value="300">5 daq</option>
+    </select>
+  </div>
+  <button id="kesBtn" style="width:100%;margin-top:10px">Kes va ko'r</button>
+</div>
+
+<h2>Hodisalar (alertlar)</h2>
+<div class="card" id="events"><div class="center">yuklanmoqda…</div></div>
+
+<div class="card" id="player">
+  <div class="row"><div class="dot"></div><div class="grow" id="clipInfo"></div></div>
+  <video id="video" controls playsinline></video>
+  <button class="done" id="doneBtn">✓ Ish bitdi (videoni o'chirish)</button>
+</div>
+
+<script>
+const tg = window.Telegram ? window.Telegram.WebApp : null;
+if (tg) { tg.ready(); tg.expand(); }
+const initData = tg ? tg.initData : "";
+const H = { "Content-Type": "application/json", "X-Init-Data": initData };
+let curId = null;
+
+async function api(path, opts={}) {
+  opts.headers = Object.assign({}, H, opts.headers||{});
+  const r = await fetch(path, opts);
+  if (!r.ok) throw new Error((await r.json().catch(()=>({}))).detail || r.status);
+  return r.json();
+}
+
+function el(tag, cls, txt) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (txt != null) e.textContent = txt;
+  return e;
+}
+
+async function loadStatus() {
+  try {
+    const d = await api("/api/status");
+    const box = document.getElementById("status");
+    box.innerHTML = "";
+    if (!d.kameralar.length) { box.appendChild(el("span","muted","ma'lumot yo'q")); return; }
+    d.kameralar.forEach(c => {
+      const w = el("div");
+      const t = el("div"); t.innerHTML = "<b>"+c.kadrda+"</b>";
+      const lbl = el("div","muted", c.kamera + (c.jonli ? "" : " ⚠️"));
+      let extra = "";
+      if (c.line) extra = "kirdi "+c.kirdi+" · chiqdi "+c.chiqdi;
+      if (c.zone) extra = "navbat "+c.navbat+" · "+c.kutish+"s";
+      if (extra) lbl.textContent = c.kamera + " — " + extra;
+      w.appendChild(t); w.appendChild(lbl);
+      box.appendChild(w);
+    });
+  } catch(e) { document.getElementById("status").textContent = "xato: "+e.message; }
+}
+
+async function loadEvents() {
+  const box = document.getElementById("events");
+  try {
+    const d = await api("/api/events");
+    box.innerHTML = "";
+    if (!d.hodisalar.length) { box.appendChild(el("div","center","Hozircha hodisa yo'q")); return; }
+    d.hodisalar.forEach(ev => {
+      const row = el("div","ev row");
+      const info = el("div","grow");
+      info.appendChild(el("div", null, ev.xabar));
+      info.appendChild(el("div","muted", ev.vaqt + " · " + ev.kamera));
+      const btn = el("button","ghost","Ko'rish");
+      btn.onclick = () => kesib(ev.ts - 60, ev.ts + 30, ev.vaqt);
+      row.appendChild(info); row.appendChild(btn);
+      box.appendChild(row);
+    });
+  } catch(e) { box.innerHTML = ""; box.appendChild(el("div","center","xato: "+e.message)); }
+}
+
+async function kesib(start, end, label) {
+  const player = document.getElementById("player");
+  const info = document.getElementById("clipInfo");
+  const video = document.getElementById("video");
+  player.style.display = "block";
+  info.textContent = "Video tayyorlanmoqda…";
+  video.style.display = "none";
+  document.getElementById("doneBtn").style.display = "none";
+  player.scrollIntoView({behavior:"smooth"});
+  try {
+    const d = await api("/api/clip", {method:"POST",
+      body: JSON.stringify({start, end})});
+    if (!d.ok) { info.textContent = d.xabar || "video yasalmadi"; return; }
+    curId = d.id;
+    info.textContent = (label ? label+" · " : "") + d.start+"–"+d.end+" · "+d.kadrlar+" kadr";
+    video.src = d.url; video.style.display = "block"; video.load();
+    document.getElementById("doneBtn").style.display = "block";
+  } catch(e) { info.textContent = "xato: "+e.message; }
+}
+
+document.getElementById("kesBtn").onclick = () => {
+  const v = document.getElementById("vaqt").value;
+  if (!v) { if (tg) tg.showAlert("Vaqtni tanlang"); return; }
+  const parts = v.split(":").map(Number);
+  const d = new Date(); d.setHours(parts[0], parts[1], parts[2]||0, 0);
+  const start = Math.floor(d.getTime()/1000);
+  const dur = parseInt(document.getElementById("davomiylik").value);
+  kesib(start, start + dur, "Vaqt "+v);
+};
+
+document.getElementById("doneBtn").onclick = async () => {
+  if (!curId) return;
+  try {
+    await api("/api/done/"+curId, {method:"POST"});
+    document.getElementById("video").src = "";
+    document.getElementById("player").style.display = "none";
+    curId = null;
+    if (tg) tg.showPopup ? tg.showPopup({message:"Video o'chirildi ✓"}) : tg.showAlert("O'chirildi");
+  } catch(e) { if (tg) tg.showAlert("xato: "+e.message); }
+};
+
+loadStatus(); loadEvents();
+setInterval(loadStatus, 8000);
+</script>
+</body>
+</html>

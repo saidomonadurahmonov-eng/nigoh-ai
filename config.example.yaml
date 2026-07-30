@@ -1,0 +1,67 @@
+# NIGOH AI — namuna konfiguratsiya / example configuration
+# Bu faylni `config.yaml` deb nusxalab, o'z qiymatlaringizni yozing.
+# Copy this file to `config.yaml` and fill in your own values.
+# HECH QACHON haqiqiy config.yaml ni git'ga qo'shmang (.gitignore da).
+
+# --- Video manbasi: NVR (Hikvision ISAPI JPEG) ---
+# Kadr NVR'dan ISAPI JPEG snapshot orqali olinadi — RTSP H.264/H.265 dekod
+# ("yashil kadr") muammosi butunlay chetlab o'tiladi.
+nvr:
+  ip: 192.168.1.64
+  user: admin
+  pass: "PAROLNI_SHU_YERGA"
+
+# --- Kameralar ---
+# channel: NVR kanal raqami (1..N). Substream (x02) o'lchami odatda 704x576 —
+#          line/zone koordinatalari SHU o'lchamda beriladi.
+#   line: virtual chiziq [[x1,y1],[x2,y2]] — kesib o'tganlar kirdi/chiqdi
+#   zone: poligon [[x,y], ...] — ichidagilar soni + kutish vaqti
+#   ikkalasi ham bo'lmasa — kadrdagi odamlar soni (bandlik) sanaladi
+cameras:
+  kirish:
+    channel: 1
+    fps: 3
+    line: [[85, 255], [515, 218]]
+  kassa:
+    channel: 6
+    fps: 3
+    zone: [[180, 250], [470, 235], [600, 480], [240, 560]]
+
+# NVR o'rniga oddiy webkamera yoki video fayl bilan sinash uchun:
+# source: 0            # webkamera
+# source: sinov.mp4    # fayl
+
+# --- Telegram ---
+telegram:
+  token: ""            # @BotFather bergan token
+  chat_id: ""          # tools/chat_id.py chiqargan raqam
+  rasm: true           # alert bilan surat yuborilsinmi
+
+db: analitika.db
+arxiv: kassa_arxiv     # so'rov bo'lganda kesiladigan kadr arxivi
+
+kirish_kamera: kirish  # kunlik hisobot grafigi shu kameradan
+kassa_kamera: kassa    # dalil videosi shu kameradan
+hisobot_soat: 21       # kunlik hisobot vaqti
+arxiv_kun: 14          # arxiv necha kun saqlanadi
+
+# --- Mini App ---
+webapp_port: 8770
+webapp_dev: false      # true = auth chetlab o'tiladi (FAQAT lokal sinov!)
+webapp_url: ""
+
+# --- Gibrid rejim: Mini App bulutda, agent obyektdan tashqariga ulanadi ---
+# Obyekt kompyuteri internetga OCHILMAYDI — faqat o'zi tashqariga so'rov yuboradi.
+railway_url: ""
+agent_secret: ""       # bulut ENV AGENT_SECRET bilan bir xil bo'lsin
+
+# --- Qoidalar: chegara + davomiylik + cooldown ---
+# xabar ichida: {navbat} {kutish} {ichkarida} {kirdi} {chiqdi} {kadrda} {kamera}
+rules:
+  - name: navbat_uzun
+    kamera: kassa
+    metrika: navbat
+    chegara: 3
+    davomiylik: 45
+    cooldown: 600
+    xabar: "Kassada navbat: {navbat} kishi, kutish {kutish}s."
