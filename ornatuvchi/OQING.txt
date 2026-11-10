@@ -1,0 +1,43 @@
+NIGOH AI — O'RNATISH QO'LLANMASI
+=================================
+
+NIMA KERAK
+  1. Windows kompyuter (do'konda, doim yoniq turadigan)
+  2. Shu kompyuter kameralar bilan BIR TARMOQDA bo'lsin
+     (tekshirish: brauzerda videoyozgich manzili ochilsa - joyida)
+  3. Internet
+  4. Videoyozgich (NVR) paroli
+
+O'RNATISH — 1 QADAM
+  "ORNATISH.bat" faylini ikki marta bosing.
+
+  Hammasi o'zi bo'ladi (10-20 daqiqa):
+   - kerakli dasturlar yuklanadi
+   - xizmat sozlanadi
+   - kompyuter har yonganda o'zi ishga tushadigan qilinadi
+   - oxirida ULASH KODI chiqadi (masalan: 7K4-92B)
+
+  Oynani yopmang, kompyuter yoniq tursin.
+
+KEYIN — TELEFONDA
+  1. Telegramda sizga berilgan botni oching
+     (bot nomi o'rnatish oxirida ULASH KODI bilan birga ekranda chiqadi)
+  2. /start bosing
+  3. Do'kon nomini yozing
+  4. Ekrandagi ULASH KODINI yozing
+  5. Videoyozgich (NVR) parolini yozing
+
+  Bot kameralarni o'zi topadi va "Panelni ochish" tugmasi chiqadi.
+  Panelda kameralarga nom berib, kirish chizig'i va kassa zonasini
+  barmoq bilan chizasiz. Tamom.
+
+MUAMMO BO'LSA
+  - "Kod olinmadi" - internetni tekshiring, ORNATISH.bat ni qayta bosing
+  - "NVR topilmadi" - parolni tekshiring yoki kompyuter kameralar
+    tarmog'ida emasligini tekshiring
+  - Kod keyinroq ham kerak bo'lsa:
+    C:\Users\<foydalanuvchi>\AppData\Local\NigohAI\ULASH_KODI.txt
+
+O'CHIRISH
+  1. Startup papkadagi NigohAI.vbs ni o'chiring (Win+R -> shell:startup)
+  2. AppData\Local\NigohAI papkasini o'chiring

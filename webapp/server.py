@@ -42,7 +42,9 @@ def _check(init_data):
     """Telegram WebApp initData imzosini tekshiradi va egasi ekanini."""
     if CTX["dev"]:
         return True
-    if not init_data:
+    # Token yoki egasi sozlanmagan bo'lsa imzo hech narsani isbotlamaydi
+    # (bo'sh kalit bilan uni istalgan odam yasay oladi) — hammasini rad etamiz.
+    if not init_data or not CTX["token"] or not CTX["owner"]:
         return False
     try:
         pairs = dict(urllib.parse.parse_qsl(init_data))

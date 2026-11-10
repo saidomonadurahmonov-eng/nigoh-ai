@@ -1,0 +1,4 @@
+# Windows skriptlari baytma-bayt saqlansin: .bat fayllar CRLF bilan,
+# ornat.ps1 esa UTF-8 BOM bilan ishlaydi (PowerShell 5.1 BOM'siz faylni buzib o'qiydi).
+*.bat -text
+*.ps1 -text

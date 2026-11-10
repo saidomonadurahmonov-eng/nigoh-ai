@@ -19,10 +19,25 @@ class RuleEngine:
         self._since = {}
         self._last_fired = {}
 
+    @staticmethod
+    def _vaqt_mos(r, now):
+        """Qoida faqat belgilangan soatlar oralig'ida ishlasin (masalan tunda)."""
+        d, g = r.get("soat_dan"), r.get("soat_gacha")
+        if d is None or g is None:
+            return True
+        import datetime as _dt
+        soat = _dt.datetime.fromtimestamp(now).hour
+        if d <= g:
+            return d <= soat < g
+        return soat >= d or soat < g      # yarim tundan o'tadigan oraliq
+
     def update(self, camera, metrics, now):
         fired = []
         for r in self.rules:
             if r.get("kamera") not in (None, camera):
+                continue
+            if not self._vaqt_mos(r, now):
+                self._since.pop((r["name"], camera), None)
                 continue
             key = (r["name"], camera)
             value = metrics.get(r.get("metrika", "navbat"), 0)

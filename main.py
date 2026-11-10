@@ -22,6 +22,8 @@ from events.engine import RuleEngine
 from report import daily
 from storage import evidence
 from storage.db import Database
+from storage.person_index import PersonIndex, TrackBuffer
+from vision import reid
 from vision.detector import PersonTracker
 from vision.stream import FrameSource, ISAPIFrameSource, masked
 from vision.zones import LineCounter, QueueZone
@@ -40,6 +42,33 @@ PRINT_INTERVAL = 2.0
 LINE_COLOR = (60, 60, 230)
 ZONE_COLOR = (30, 160, 240)
 UZILISH_SEK = 30
+
+
+def _nisbiymi(nuqtalar):
+    """Koordinatalar kadrga NISBATAN (0..1) berilganmi yoki pikseldami."""
+    try:
+        return all(0.0 <= float(v) <= 1.0 for p in nuqtalar for v in p)
+    except (TypeError, ValueError):
+        return False
+
+
+def koord_piksel(cfg, w, h):
+    """line/zone ni shu kadr o'lchamidagi piksellarga keltiradi.
+
+    Nisbiy (0..1) koordinata istalgan o'lchamdagi kadrga mos tushadi — panel
+    surati va tahlil kadri turli o'lchamda bo'lsa ham chiziq siljimaydi.
+    Piksel koordinata (eski sozlamalar) o'zgarishsiz qoladi.
+    """
+    out = {}
+    for kalit in ("line", "zone"):
+        nuqtalar = cfg.get(kalit)
+        if not nuqtalar:
+            continue
+        if _nisbiymi(nuqtalar):
+            nuqtalar = [[int(round(float(x) * w)), int(round(float(y) * h))]
+                        for x, y in nuqtalar]
+        out[kalit] = nuqtalar
+    return out
 
 
 class MinuteAgg:
@@ -97,13 +126,18 @@ def annotate(frame, det, cfg, line, zone, navbat, kutish, box_ann, label_ann):
 
 
 def run_camera(name, cfg, show, save, stop, db, engine, notifier, rasm, status,
-               arxiv=None):
+               arxiv=None, pindex=None, hodimlar=None):
     tracker = PersonTracker(conf=cfg.get("conf", 0.35))
     source = build_source(cfg)
-    line = LineCounter(cfg["line"][0], cfg["line"][1]) if cfg.get("line") else None
-    zone = QueueZone(cfg["zone"]) if cfg.get("zone") else None
+    # Chiziq va zona birinchi kadr kelganda quriladi: nisbiy koordinatani
+    # pikselga o'tkazish uchun kadrning haqiqiy o'lchami kerak.
+    px = None
+    line = zone = None
     agg = MinuteAgg(db, name)
     last_arxiv = 0.0
+    # Odamlar indeksi: har track uchun vaqti-vaqti bilan bitta namuna
+    tbuf = TrackBuffer(pindex, name, cfg.get("indeks_oraliq", 8.0),
+                       hodimlar=hodimlar) if pindex else None
 
     box_ann = sv.BoxAnnotator(thickness=2)
     label_ann = sv.LabelAnnotator(text_scale=0.5)
@@ -113,11 +147,17 @@ def run_camera(name, cfg, show, save, stop, db, engine, notifier, rasm, status,
     frames_done = 0
     t0 = time.time()
     status[name] = {"ts": time.time(), "is_file": source.is_file,
-                    "line": bool(line), "zone": bool(zone)}
+                    "line": bool(cfg.get("line")), "zone": bool(cfg.get("zone"))}
 
     for frame, ts in source.frames():
         if stop.is_set():
             break
+        if px is None:
+            px = koord_piksel(cfg, frame.shape[1], frame.shape[0])
+            if px.get("line"):
+                line = LineCounter(px["line"][0], px["line"][1])
+            if px.get("zone"):
+                zone = QueueZone(px["zone"])
         det = tracker.track(frame)
         now = time.time()
         status[name]["ts"] = now
@@ -134,9 +174,33 @@ def run_camera(name, cfg, show, save, stop, db, engine, notifier, rasm, status,
             "navbat": navbat,
             "kutish": int(kutish),
             "kadrda": len(det),
+            # yuzi tanilmagan (hodim emas) odamlar soni — xavfsizlik qoidasi uchun
+            "notanish": (sum(1 for v in tbuf._t.values() if v.get("hodim") is None)
+                         if tbuf is not None and hodimlar is not None else 0),
         }
         status[name].update(metrics)
         agg.update(now, metrics["kirdi"], metrics["chiqdi"], navbat, kutish)
+
+        # Odamlar indeksi: barmoq izi + kichik rasm (rasm bo'yicha qidirish uchun)
+        if tbuf is not None and det.tracker_id is not None and len(det):
+            try:
+                for box, tid in zip(det.xyxy, det.tracker_id):
+                    crop = reid.kesma(frame, box)
+                    if crop is None:
+                        continue
+                    area = int((box[2] - box[0]) * (box[3] - box[1]))
+                    # embedding faqat yangi namuna kerak bo'lganda hisoblanadi
+                    st = tbuf._t.get(int(tid))
+                    kerak = st is None or now - st["yozildi"] >= tbuf.oraliq \
+                        or area > st["area"]
+                    emb = reid.embed(crop) if kerak else None
+                    if emb is None and st is None:
+                        continue
+                    tbuf.yangila(int(tid), emb if emb is not None else st["emb"],
+                                 crop, area, now)
+                tbuf.tozala(now)
+            except Exception as e:
+                print(f"[indeks] {name}: {e}", flush=True)
 
         # Kassa dalil arxivi: harakat bo'lganda kadrni JPEG saqlaymiz (~2 fps)
         if arxiv and metrics["kadrda"] > 0 and now - last_arxiv >= 0.5:
@@ -146,7 +210,7 @@ def run_camera(name, cfg, show, save, stop, db, engine, notifier, rasm, status,
             except Exception:
                 pass
 
-        frame = annotate(frame, det, cfg, line, zone, navbat, kutish,
+        frame = annotate(frame, det, px, line, zone, navbat, kutish,
                          box_ann, label_ann)
 
         for rule_name, text in engine.update(name, metrics, now):
@@ -211,7 +275,8 @@ def watchdog(status, notifier, db, stop):
         time.sleep(5)
 
 
-def scheduler(db, tg, kirish_kamera, hisobot_soat, arxiv, arxiv_kun, stop):
+def scheduler(db, tg, kirish_kamera, hisobot_soat, arxiv, arxiv_kun, stop,
+              pindex=None, indeks_kun=14):
     """Har kuni belgilangan soatda hisobot yuboradi + eski arxivni tozalaydi."""
     import datetime as dt
     oxirgi = None
@@ -228,6 +293,11 @@ def scheduler(db, tg, kirish_kamera, hisobot_soat, arxiv, arxiv_kun, stop):
                 evidence.tozala(arxiv, arxiv_kun)      # eski dalil kadrlarini o'chir
             except Exception:
                 pass
+            if pindex is not None:
+                try:
+                    pindex.tozala(indeks_kun)          # eski odam namunalarini o'chir
+                except Exception:
+                    pass
         for _ in range(60):          # ~1 daqiqada bir tekshiradi
             if stop.is_set():
                 return
@@ -244,10 +314,13 @@ def start_webserver(conf, db, status, tg, kassa_kamera, arxiv):
                   dev=bool(conf.get("webapp_dev", False)))
     ws.tozala_kliplar()
     port = int(conf.get("webapp_port", 8770))
-    cfg = uvicorn.Config(ws.app, host="0.0.0.0", port=port, log_level="warning")
+    # Sinov rejimida ruxsat tekshirilmaydi — shuning uchun faqat shu kompyuterdan.
+    host = "127.0.0.1" if conf.get("webapp_dev") else str(
+        conf.get("webapp_host", "0.0.0.0"))
+    cfg = uvicorn.Config(ws.app, host=host, port=port, log_level="warning")
     srv = uvicorn.Server(cfg)
     threading.Thread(target=srv.run, daemon=True).start()
-    print(f"Mini App serveri: http://localhost:{port}", flush=True)
+    print(f"Mini App serveri: http://{host}:{port}", flush=True)
 
 
 def tekshir(cams):
@@ -292,7 +365,7 @@ def main():
 
     global NVR
     NVR = conf.get("nvr") or {}
-    cams = conf["cameras"]
+    cams = conf.get("cameras") or {}
     if args.camera:
         cams = {args.camera: cams[args.camera]}
 
@@ -322,6 +395,21 @@ def main():
     arxiv = conf.get("arxiv", "kassa_arxiv")
     arxiv_kun = int(conf.get("arxiv_kun", 14))
 
+    # Odamlar indeksi (rasm bo'yicha qidirish uchun) — barcha kameralarda
+    pindex = None
+    hodimlar = None
+    if conf.get("odam_indeks", True):
+        pindex = PersonIndex(conf.get("indeks_db", "odamlar.db"),
+                             conf.get("indeks_thumbs", "odamlar_thumbs"))
+        print("Odamlar indeksi yoqilgan (rasm bo'yicha qidirish tayyor)",
+              flush=True)
+        if conf.get("hodim_yuz", True):
+            from storage.employees import Employees
+            hodimlar = Employees(conf.get("hodim_db", "hodimlar.db"),
+                                 conf.get("hodim_rasm", "hodim_rasm"))
+            n = len(hodimlar.royxat())
+            print(f"Hodim yuz bazasi: {n} ta hodim ro'yxatda", flush=True)
+
     stop = threading.Event()
     status = {}
     threads = []
@@ -330,42 +418,65 @@ def main():
         if save and len(cams) > 1:
             save = f"{name}_{save}"
         cam_arxiv = arxiv if name == kassa_kamera else None
+        cam_index = pindex if cfg.get("indeks", True) else None
         t = threading.Thread(
             target=run_camera,
             args=(name, cfg, args.show, save, stop, db, engine, notifier,
-                  rasm, status, cam_arxiv),
+                  rasm, status, cam_arxiv, cam_index, hodimlar),
             daemon=True)
         t.start()
         threads.append(t)
     threading.Thread(target=watchdog, args=(status, notifier, db, stop),
                      daemon=True).start()
 
+    # Kun tahlili uchun NVR arxiv manbasi (nvr bloki bo'lsa)
+    nvr_arxiv = None
+    if NVR.get("ip"):
+        from nvr.arxiv import Arxiv
+        nvr_arxiv = Arxiv(NVR["ip"], NVR["user"], NVR["pass"])
+    kanallar = {nom: c["channel"] for nom, c in cams.items() if c.get("channel")}
+
     bot = CommandBot(tg.get("token"), tg.get("chat_id"), db, status,
-                     kassa_kamera, arxiv)
+                     kassa_kamera, arxiv, nvr_arxiv=nvr_arxiv, kanallar=kanallar)
     threading.Thread(target=bot.run, args=(stop,), daemon=True).start()
     print(f"Buyruq boti yoqildi | kassa={kassa_kamera} kirish={kirish_kamera}",
           flush=True)
 
     hisobot_soat = int(conf.get("hisobot_soat", 21))
     threading.Thread(target=scheduler,
-                     args=(db, tg, kirish_kamera, hisobot_soat, arxiv, arxiv_kun, stop),
+                     args=(db, tg, kirish_kamera, hisobot_soat, arxiv, arxiv_kun,
+                           stop, pindex, int(conf.get("indeks_kun", 14))),
                      daemon=True).start()
     print(f"Kunlik hisobot har kuni soat {hisobot_soat}:00 da", flush=True)
 
-    try:
-        start_webserver(conf, db, status, tg, kassa_kamera, arxiv)
-    except Exception as e:
-        print(f"[webapp] server ishga tushmadi: {e}", flush=True)
+    # Lokal Mini App serveri faqat o'z boti sozlangan (yakka) rejimda kerak.
+    # Bulut rejimida panel bulutda turadi, token bo'sh — serverni ochmaymiz.
+    if (tg.get("token") and tg.get("chat_id")) or conf.get("webapp_dev"):
+        try:
+            start_webserver(conf, db, status, tg, kassa_kamera, arxiv)
+        except Exception as e:
+            print(f"[webapp] server ishga tushmadi: {e}", flush=True)
+    else:
+        print("Lokal Mini App serveri o'chiq (telegram token/chat_id yo'q)",
+              flush=True)
 
     # Railway gibrid: agent tashqariga ulanib video so'rovlarini bajaradi
     if conf.get("railway_url") and conf.get("agent_secret"):
         from bot.agent import Agent
         ag = Agent(conf["railway_url"], conf["agent_secret"], db, status,
-                   kassa_kamera, arxiv)
+                   kassa_kamera, arxiv, pindex,
+                   nvr_arxiv=nvr_arxiv, kanallar=kanallar, hodimlar=hodimlar)
         threading.Thread(target=ag.run, args=(stop,), daemon=True).start()
     try:
-        while any(t.is_alive() for t in threads):
-            time.sleep(0.5)
+        if threads:
+            while any(t.is_alive() for t in threads):
+                time.sleep(0.5)
+        else:
+            # Hamma kamera "tahlilsiz" — agent va bot ishlab turishi uchun kutamiz
+            print("Tahlil qilinadigan kamera yo'q — agent/bot ishlayapti",
+                  flush=True)
+            while not stop.is_set():
+                time.sleep(1)
     except KeyboardInterrupt:
         print("To'xtatilmoqda...")
         stop.set()

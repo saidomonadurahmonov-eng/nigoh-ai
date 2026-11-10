@@ -62,6 +62,49 @@
   <button id="kesBtn" style="width:100%;margin-top:10px">Kes va ko'r</button>
 </div>
 
+<h2>📅 Kun tahlili (arxivdan)</h2>
+<div class="card">
+  <div class="muted" style="margin-bottom:8px">Sanani tanlang — AI o'sha kunning
+    NVR arxivini o'zi ko'rib chiqib, nima bo'lganini aytadi (5–15 daqiqa).</div>
+  <div class="row">
+    <input type="date" id="kunSana" class="grow">
+    <select id="kunKamera"></select>
+  </div>
+  <button id="kunBtn" style="width:100%;margin-top:10px">Tekshir</button>
+  <div id="kunNatija" style="margin-top:10px"></div>
+</div>
+
+<h2>Rasm bo'yicha odam qidirish</h2>
+<div class="card">
+  <div class="muted" style="margin-bottom:8px">Shubhali odamning rasmini yuklang —
+    tizim uni barcha kameralardan topib beradi.</div>
+  <div class="row">
+    <input type="file" id="foto" accept="image/*" class="grow">
+    <select id="qidirKun">
+      <option value="1" selected>bugun</option>
+      <option value="3">3 kun</option>
+      <option value="7">7 kun</option>
+      <option value="14">14 kun</option>
+    </select>
+  </div>
+  <button id="qidirBtn" style="width:100%;margin-top:10px">Qidirish</button>
+  <div id="qidirNatija" style="margin-top:10px"></div>
+</div>
+
+<h2>Hodimlar (yuz bo'yicha)</h2>
+<div class="card">
+  <div class="muted" style="margin-bottom:8px">Hodim yuzining aniq rasmini qo'shing —
+    tizim uni "o'ziniki" deb taniydi, qolganlar begona hisoblanadi.</div>
+  <div class="row">
+    <input type="text" id="hodimIsm" placeholder="Ism" class="grow">
+  </div>
+  <div class="row" style="margin-top:8px">
+    <input type="file" id="hodimFoto" accept="image/*" class="grow">
+    <button id="hodimBtn">Qo'shish</button>
+  </div>
+  <div id="hodimlar" style="margin-top:10px"></div>
+</div>
+
 <h2>Kassa faoliyati (bugun)</h2>
 <div class="card" id="sessions"><div class="center">yuklanmoqda…</div></div>
 
@@ -177,6 +220,179 @@ async function kesib(start, end, label, seg=null) {
   } catch(e){ info.textContent="xato: "+e.message; }
 }
 
+async function loadHodimlar() {
+  const box = document.getElementById("hodimlar");
+  try {
+    const d = await api("/api/employees");
+    box.innerHTML = "";
+    const st = d.stat || {};
+    if (st.hodimlar || st.nomalum !== undefined) {
+      const h = Object.values(st.hodimlar||{}).reduce((a,b)=>a+b,0);
+      box.appendChild(el("div","muted",
+        "Bugun: "+h+" hodim tashrifi · "+(st.nomalum||0)+" noma'lum · "+
+        (st.namunalar||0)+" namuna indeksda"));
+    }
+    (d.hodimlar||[]).forEach(h => {
+      const row = el("div","ev row");
+      row.appendChild(el("div","grow", h.ism));
+      const b = el("button","ghost","O'chirish");
+      b.onclick = async () => {
+        try { await api("/api/employee_del/"+h.id,{method:"POST"});
+          setTimeout(loadHodimlar, 2000); } catch(e){}
+      };
+      row.appendChild(b);
+      box.appendChild(row);
+    });
+    if (!(d.hodimlar||[]).length) box.appendChild(el("div","muted","Hali hodim qo'shilmagan"));
+  } catch(e){}
+}
+
+document.getElementById("hodimBtn").onclick = async () => {
+  const ism = document.getElementById("hodimIsm").value.trim();
+  const f = document.getElementById("hodimFoto").files[0];
+  const box = document.getElementById("hodimlar");
+  if (!ism || !f) { if(tg) tg.showAlert("Ism va rasm kerak"); return; }
+  const btn = document.getElementById("hodimBtn"); btn.disabled = true;
+  try {
+    const fd = new FormData(); fd.append("ism", ism); fd.append("photo", f);
+    const r = await fetch("/api/employee", {method:"POST",
+      headers:{"X-Init-Data":initData}, body:fd});
+    const d = await r.json();
+    if (!d.ok) { if(tg) tg.showAlert(d.xabar||"xato"); return; }
+    box.innerHTML=""; box.appendChild(el("div","muted","Yuz tekshirilmoqda…"));
+    for (let i=0;i<20;i++){
+      await sleep(1500);
+      const s = await api("/api/search/"+d.id);
+      if (s.status==="ready"){
+        if(tg) tg.showAlert(s.xabar || "Qo'shildi");
+        document.getElementById("hodimIsm").value="";
+        document.getElementById("hodimFoto").value="";
+        setTimeout(loadHodimlar, 1500); return;
+      }
+    }
+    if(tg) tg.showAlert("Javob kelmadi");
+  } catch(e){ if(tg) tg.showAlert("xato: "+e.message); }
+  finally { btn.disabled=false; }
+};
+
+document.getElementById("qidirBtn").onclick = async () => {
+  const f = document.getElementById("foto").files[0];
+  const box = document.getElementById("qidirNatija");
+  if (!f) { if(tg) tg.showAlert("Avval rasm tanlang"); return; }
+  const btn = document.getElementById("qidirBtn");
+  btn.disabled = true; box.innerHTML = "";
+  box.appendChild(el("div","muted","Rasm yuborilmoqda…"));
+  try {
+    const kun = document.getElementById("qidirKun").value;
+    const fd = new FormData(); fd.append("photo", f);
+    const r = await fetch("/api/search?kun="+kun,
+      {method:"POST", headers:{"X-Init-Data":initData}, body:fd});
+    const d = await r.json();
+    if (!d.ok) { box.innerHTML=""; box.appendChild(el("div","muted",d.xabar||"xato")); return; }
+    for (let i=0;i<60;i++){
+      await sleep(1500);
+      const s = await api("/api/search/"+d.id);
+      if (s.status==="ready"){ korsatNatija(s, box); return; }
+      box.innerHTML=""; box.appendChild(el("div","muted","Qidirilmoqda… ("+((i+1)*1.5|0)+"s)"));
+    }
+    box.innerHTML=""; box.appendChild(el("div","muted","Juda uzoq kutildi."));
+  } catch(e){ box.innerHTML=""; box.appendChild(el("div","muted","xato: "+e.message)); }
+  finally { btn.disabled = false; }
+};
+
+/* --- Kun tahlili: sana tanlanadi, agent NVR arxivini ko'rib chiqadi --- */
+async function kunKameralarYukla() {
+  const sel = document.getElementById("kunKamera");
+  try {
+    const d = await api("/api/kameralar");
+    const k = d.kameralar || {};
+    sel.innerHTML = "";
+    Object.entries(k).forEach(([nom, ch]) => {
+      const o = document.createElement("option");
+      o.value = ch; o.textContent = nom;
+      sel.appendChild(o);
+    });
+    if (!sel.options.length) sel.appendChild(new Option("kirish", 1));
+  } catch(e) { sel.innerHTML = ""; sel.appendChild(new Option("kirish", 1)); }
+  const d = new Date(Date.now() - 86400000);
+  document.getElementById("kunSana").value = d.toISOString().slice(0, 10);
+}
+
+document.getElementById("kunBtn").onclick = async () => {
+  const box = document.getElementById("kunNatija");
+  const btn = document.getElementById("kunBtn");
+  const sana = document.getElementById("kunSana").value;
+  const sel = document.getElementById("kunKamera");
+  if (!sana) { box.innerHTML=""; box.appendChild(el("div","muted","Sanani tanlang")); return; }
+  btn.disabled = true; box.innerHTML = "";
+  box.appendChild(el("div","muted","So'rov yuborilmoqda…"));
+  try {
+    const r = await fetch("/api/kun", {method:"POST",
+      headers:{"X-Init-Data":initData, "Content-Type":"application/json"},
+      body: JSON.stringify({sana: sana, kanal: +sel.value,
+                            nomi: sel.options[sel.selectedIndex]?.textContent || ""})});
+    const d = await r.json();
+    if (!d.ok) { box.innerHTML=""; box.appendChild(el("div","muted",d.xabar||"xato")); return; }
+    for (let i=0;i<900;i++){          // 15 daqiqagacha kutamiz
+      await sleep(2000);
+      const s = await api("/api/kun/"+d.id);
+      if (s.status==="ready"){ korsatKun(s, box); return; }
+      box.innerHTML="";
+      box.appendChild(el("div","muted","Arxiv tekshirilmoqda… ("+((i+1)*2)+"s)"));
+    }
+    box.innerHTML=""; box.appendChild(el("div","muted","Juda uzoq kutildi."));
+  } catch(e){ box.innerHTML=""; box.appendChild(el("div","muted","xato: "+e.message)); }
+  finally { btn.disabled = false; }
+};
+
+function korsatKun(s, box) {
+  box.innerHTML = "";
+  if (s.xabar && !s.xulosa) { box.appendChild(el("div","muted", s.xabar)); return; }
+  const x = el("div", null);
+  x.style = "white-space:pre-wrap;line-height:1.55;font-size:14px";
+  x.innerHTML = (s.xulosa || "").replace(/<b>/g,"<b>").replace(/<i>/g,"<i>");
+  box.appendChild(x);
+  (s.lahzalar || []).forEach(l => {
+    const row = el("div","ev row");
+    if (l.rasm) {
+      const im = document.createElement("img");
+      im.src = "data:image/jpeg;base64,"+l.rasm;
+      im.style = "height:72px;border-radius:8px;flex:none";
+      row.appendChild(im);
+    }
+    const info = el("div","grow");
+    info.appendChild(el("div", null, l.teg));
+    info.appendChild(el("div","muted", l.vaqt + " · " + l.odam + " odam"));
+    const b = el("button","ghost","Video");
+    b.onclick = () => kesib(l.start-20, l.end+20, l.teg+" "+l.vaqt);
+    row.appendChild(info); row.appendChild(b);
+    box.appendChild(row);
+  });
+}
+
+function korsatNatija(s, box) {
+  box.innerHTML = "";
+  const n = s.natija || [];
+  if (!n.length) { box.appendChild(el("div","muted", s.xabar || "Topilmadi")); return; }
+  box.appendChild(el("div","muted", n.length+" ta uchrashuv topildi:"));
+  n.forEach(r => {
+    const row = el("div","ev row");
+    if (r.rasm) {
+      const im = document.createElement("img");
+      im.src = "data:image/jpeg;base64,"+r.rasm;
+      im.style = "height:64px;border-radius:8px;flex:none";
+      row.appendChild(im);
+    }
+    const info = el("div","grow");
+    info.appendChild(el("div", null, r.kamera + " · " + Math.round(r.score*100) + "%"));
+    info.appendChild(el("div","muted", r.vaqt));
+    const btn = el("button","ghost","Video");
+    btn.onclick = () => kesib(r.start-30, r.end+30, r.kamera+" "+r.vaqt);
+    row.appendChild(info); row.appendChild(btn);
+    box.appendChild(row);
+  });
+}
+
 document.getElementById("kesBtn").onclick = () => {
   const v=document.getElementById("vaqt").value;
   if(!v){ if(tg) tg.showAlert("Vaqtni tanlang"); return; }
@@ -204,8 +420,9 @@ document.getElementById("doneBtn").onclick = async () => {
   } catch(e){ if(tg) tg.showAlert("xato"); }
 };
 
-loadStatus(); loadSessions(); loadEvents();
-setInterval(loadStatus, 6000); setInterval(loadSessions, 15000); setInterval(loadEvents, 20000);
+loadStatus(); loadSessions(); loadEvents(); loadHodimlar(); kunKameralarYukla();
+setInterval(loadStatus, 6000); setInterval(loadSessions, 15000);
+setInterval(loadEvents, 20000); setInterval(loadHodimlar, 30000);
 </script>
 </body>
 </html>

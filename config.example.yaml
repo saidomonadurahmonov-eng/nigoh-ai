@@ -12,20 +12,23 @@ nvr:
   pass: "PAROLNI_SHU_YERGA"
 
 # --- Kameralar ---
-# channel: NVR kanal raqami (1..N). Substream (x02) o'lchami odatda 704x576 —
-#          line/zone koordinatalari SHU o'lchamda beriladi.
+# channel: NVR kanal raqami (1..N).
 #   line: virtual chiziq [[x1,y1],[x2,y2]] — kesib o'tganlar kirdi/chiqdi
 #   zone: poligon [[x,y], ...] — ichidagilar soni + kutish vaqti
 #   ikkalasi ham bo'lmasa — kadrdagi odamlar soni (bandlik) sanaladi
+# Koordinata IKKI xil yozilishi mumkin:
+#   nisbiy  — 0..1 oralig'ida, kadr o'lchamiga nisbatan (TAVSIYA: kadr o'lchami
+#             o'zgarsa ham chiziq o'z joyida qoladi), masalan [[0.12, 0.44], [0.73, 0.38]]
+#   piksel  — tahlil kadri o'lchamida (substream x02, odatda 704x576)
 cameras:
   kirish:
     channel: 1
     fps: 3
-    line: [[85, 255], [515, 218]]
+    line: [[0.12, 0.44], [0.73, 0.38]]
   kassa:
     channel: 6
     fps: 3
-    zone: [[180, 250], [470, 235], [600, 480], [240, 560]]
+    zone: [[0.26, 0.43], [0.67, 0.41], [0.85, 0.83], [0.34, 0.97]]
 
 # NVR o'rniga oddiy webkamera yoki video fayl bilan sinash uchun:
 # source: 0            # webkamera
@@ -45,9 +48,17 @@ kassa_kamera: kassa    # dalil videosi shu kameradan
 hisobot_soat: 21       # kunlik hisobot vaqti
 arxiv_kun: 14          # arxiv necha kun saqlanadi
 
-# --- Mini App ---
+# --- Odam qidiruv (rasm bo'yicha) va hodim yuz ID ---
+# Ikkalasi ham ixtiyoriy. Maxfiylik uchun o'chirib qo'yish mumkin: false
+odam_indeks: true      # odamlarning tashqi ko'rinish "barmoq izi" (qidiruv uchun)
+indeks_kun: 14         # namunalar necha kun saqlanadi
+hodim_yuz: true        # ro'yxatdagi hodimlarni yuzidan tanish (davomat, "notanish")
+
+# --- Lokal Mini App ---
+# Server faqat telegram.token va chat_id to'ldirilgan bo'lsa ishga tushadi.
 webapp_port: 8770
-webapp_dev: false      # true = auth chetlab o'tiladi (FAQAT lokal sinov!)
+webapp_host: 0.0.0.0   # faqat shu kompyuterdan ochilsin desangiz: 127.0.0.1
+webapp_dev: false      # true = ruxsat tekshirilmaydi, server faqat 127.0.0.1 da (sinov uchun)
 webapp_url: ""
 
 # --- Gibrid rejim: Mini App bulutda, agent obyektdan tashqariga ulanadi ---
@@ -57,11 +68,22 @@ agent_secret: ""       # bulut ENV AGENT_SECRET bilan bir xil bo'lsin
 
 # --- Qoidalar: chegara + davomiylik + cooldown ---
 # xabar ichida: {navbat} {kutish} {ichkarida} {kirdi} {chiqdi} {kadrda} {kamera}
+# soat_dan / soat_gacha — qoida faqat shu soatlar oralig'ida ishlaydi
+# (yarim tundan o'tadigan oraliq ham bo'ladi: 21 -> 8).
 rules:
   - name: navbat_uzun
     kamera: kassa
     metrika: navbat
     chegara: 3
     davomiylik: 45
-    cooldown: 600
+    cooldown: 900
     xabar: "Kassada navbat: {navbat} kishi, kutish {kutish}s."
+  - name: ishdan_tashqari
+    kamera: kirish
+    metrika: kadrda
+    chegara: 1
+    davomiylik: 5
+    cooldown: 900
+    soat_dan: 21
+    soat_gacha: 8
+    xabar: "ISHDAN TASHQARI HARAKAT! {kamera}: {kadrda} kishi"
